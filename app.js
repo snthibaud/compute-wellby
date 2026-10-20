@@ -204,8 +204,9 @@ function renderScenarios() {
   const update = () => schedule();
   const head = el("tr", {}, el("th", {}), ...["a", "b"].map((k) => el("th", {}, el("span", { class: "key", style: `background: var(--series-${k})` }), k.toUpperCase())));
   const rows = [
-    el("tr", {}, el("td", { class: "lab", text: "Name" }), ...["a", "b"].map((k) =>
-      el("td", {}, el("input", { type: "text", value: side(k).name, "aria-label": `Name of scenario ${k.toUpperCase()}`, oninput: (e) => { side(k).name = e.target.value; renderLegend(); update(); } })))),
+    ...["a", "b"].map((k) => el("tr", {},
+      el("td", { class: "lab" }, el("span", { class: "key", style: `background: var(--series-${k})` }), `Name of ${k.toUpperCase()}`),
+      el("td", { colspan: 2 }, el("input", { type: "text", value: side(k).name, "aria-label": `Name of scenario ${k.toUpperCase()}`, oninput: (e) => { side(k).name = e.target.value; renderLegend(); update(); } })))),
     el("tr", { class: "group" }, el("td", { colspan: 3, text: "Compute" })),
     el("tr", {}, el("td", { class: "lab" }, el("span", { "data-help-lever": "cap", text: "Cap on compute growth, OOM/yr" })), ...["a", "b"].map((k) => {
       const box = el("input", { type: "checkbox", checked: side(k).cap !== null, "aria-label": `Cap compute growth in ${k.toUpperCase()}` });
@@ -582,11 +583,9 @@ async function renderGraph() {
   graphBuilt = true;
   const showInputs = $("#show-inputs").checked;
   const host = $("#graph");
-  host.replaceChildren();
   const ghosts = new Set(D.edges.filter((e) => e.lag === "nextYear").map((e) => e.to));
-  const boxes = new Map();
   const make = (n, ghost) => {
-    const box = el("div", { class: `gnode${ghost ? " ghost" : ""}`, tabindex: 0, "data-node": n.id, role: "button", "aria-label": `${n.label}${ghost ? ", next year" : ""}` },
+    const box = el("div", { class: `gnode${ghost ? " ghost" : ""}`, tabindex: 0, "data-node": n.id, "data-key": `${n.id}@${ghost ? 1 : 0}`, role: "button", "aria-label": `${n.label}${ghost ? ", next year" : ""}` },
       el("div", { class: "gl", text: ghost ? `${n.label}, next year` : n.label }),
       el("div", { class: "gf" }, tex(ghost ? nextSymbol(n.symbol) : n.formula)),
       !ghost && showInputs ? inputsLine(n) : null);
@@ -596,77 +595,90 @@ async function renderGraph() {
     box.addEventListener("blur", () => focusNode(null));
     box.addEventListener("click", () => selectNode(n.id));
     box.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { selectNode(n.id); e.preventDefault(); } });
-    host.append(box);
     return box;
   };
-  for (const n of D.nodes) boxes.set(`${n.id}@0`, make(n, false));
-  for (const n of D.nodes) if (ghosts.has(n.id)) boxes.set(`${n.id}@1`, make(n, true));
-  void host.offsetWidth;
+  const band = (title, nodes) => el("div", { class: "gband" }, el("div", { class: "gband-title", text: title }), el("div", { class: "gnodes" }, nodes));
+  const ghostsOf = (g) => D.nodes.filter((n) => n.group === g && ghosts.has(n.id)).map((n, i) => {
+    const box = make(n, true);
+    if (i === 0) box.classList.add("first");
+    return box;
+  });
+  host.replaceChildren(
+    svg("svg", { class: "edges", "aria-hidden": "true" }),
+    ...GROUPS.map((g) => band(g[0].toUpperCase() + g.slice(1), [...D.nodes.filter((n) => n.group === g).map((n) => make(n, false)), ...ghostsOf(g)])),
+  );
   await document.fonts.ready;
-  await new Promise(requestAnimationFrame);
-
-  const gapX = 64;
-  const gapY = 16;
-  const top = 34;
-  const colWidth = GROUPS.map((g) => Math.max(...D.nodes.filter((n) => n.group === g).flatMap((n) => [boxes.get(`${n.id}@0`), boxes.get(`${n.id}@1`)]).filter(Boolean).map((b) => b.offsetWidth)));
-  const colX = colWidth.reduce((xs, w, i) => xs.concat(i === 0 ? [16] : [xs[i - 1] + colWidth[i - 1] + gapX]), []).slice(0, GROUPS.length);
-  const place = new Map();
-  let band0Bottom = 0;
-  GROUPS.forEach((g, gi) => {
-    let y = top;
-    for (const n of D.nodes.filter((m) => m.group === g)) {
-      const b = boxes.get(`${n.id}@0`);
-      place.set(`${n.id}@0`, { x: colX[gi], y, w: b.offsetWidth, h: b.offsetHeight });
-      y += b.offsetHeight + gapY;
-    }
-    band0Bottom = Math.max(band0Bottom, y);
-  });
-  const band1Top = band0Bottom + 56;
-  let band1Bottom = band1Top;
-  GROUPS.forEach((g, gi) => {
-    let y = band1Top;
-    for (const n of D.nodes.filter((m) => m.group === g && ghosts.has(m.id))) {
-      const b = boxes.get(`${n.id}@1`);
-      place.set(`${n.id}@1`, { x: colX[gi], y, w: b.offsetWidth, h: b.offsetHeight });
-      y += b.offsetHeight + gapY;
-    }
-    band1Bottom = Math.max(band1Bottom, y);
-  });
-  for (const [k, p] of place) Object.assign(boxes.get(k).style, { left: `${p.x}px`, top: `${p.y}px` });
-  const width = colX[GROUPS.length - 1] + colWidth[GROUPS.length - 1] + 16;
-  const height = band1Bottom + 8;
-  host.style.width = `${width}px`;
-  host.style.height = `${height}px`;
-  GROUPS.forEach((g, gi) => host.append(el("div", { class: "group-label", style: `left: ${colX[gi]}px; top: 8px`, text: g[0].toUpperCase() + g.slice(1) })));
-  host.append(el("div", { class: "band-label", style: `left: 16px; top: ${band1Top - 24}px`, text: "Next year: values carried forward" }));
-
-  const marker = (id, color) => svg("marker", { id, viewBox: "0 0 8 8", refX: 7, refY: 4, markerWidth: 7, markerHeight: 7, orient: "auto-start-reverse" }, svg("path", { d: "M0,0 L8,4 L0,8 Z", fill: color }));
-  const layer = svg("svg", { width, height },
-    svg("defs", {}, marker("arrow", "var(--edge)"), marker("arrow-lag", "var(--edge-lag)"), marker("arrow-on", "var(--hi)")),
-    svg("line", { x1: 8, x2: width - 8, y1: band1Top - 30, y2: band1Top - 30, stroke: "var(--line)" }));
-  const col = (id) => GROUPS.indexOf(D.nodeById[id].group);
-  for (const e of D.edges) {
-    const s = place.get(`${e.from}@0`);
-    const lag = e.lag === "nextYear";
-    const t = place.get(`${e.to}@${lag ? 1 : 0}`);
-    let d;
-    if (lag) {
-      const x1 = s.x + s.w * 0.7;
-      const x2 = t.x + t.w * 0.3;
-      d = `M${x1},${s.y + s.h} C${x1},${s.y + s.h + 60} ${x2},${t.y - 60} ${x2},${t.y - 2}`;
-    } else if (col(e.from) === col(e.to)) {
-      const bend = 18 + Math.min(40, (t.y - s.y) / 6);
-      d = `M${s.x},${s.y + s.h / 2} C${s.x - bend},${s.y + s.h / 2} ${t.x - bend},${t.y + t.h / 2} ${t.x - 2},${t.y + t.h / 2}`;
-    } else {
-      const x1 = s.x + s.w;
-      const x2 = t.x - 2;
-      const mid = (x1 + x2) / 2;
-      d = `M${x1},${s.y + s.h / 2} C${mid},${s.y + s.h / 2} ${mid},${t.y + t.h / 2} ${x2},${t.y + t.h / 2}`;
-    }
-    layer.append(svg("path", { d, class: `edge${lag ? " lag" : ""}`, "data-from": e.from, "data-to": e.to, "marker-end": `url(#${lag ? "arrow-lag" : "arrow"})` }));
-  }
-  host.prepend(layer);
+  drawEdges();
 }
+
+const marker = (id, color) => svg("marker", { id, viewBox: "0 0 8 8", refX: 7, refY: 4, markerWidth: 7, markerHeight: 7, orient: "auto-start-reverse" }, svg("path", { d: "M0,0 L8,4 L0,8 Z", fill: color }));
+
+// Positions come from the browser's own layout, so the edges are redrawn
+// whenever the nodes re-wrap.
+function drawEdges() {
+  const host = $("#graph");
+  if (!host.offsetWidth) return;
+  const origin = host.getBoundingClientRect();
+  const place = new Map([...host.querySelectorAll(".gnode")].map((b) => {
+    const r = b.getBoundingClientRect();
+    return [b.dataset.key, { x: r.left - origin.left, y: r.top - origin.top, w: r.width, h: r.height }];
+  }));
+  const ends = D.edges.map((e) => {
+    const lag = e.lag === "nextYear";
+    return { e, lag, s: place.get(`${e.from}@0`), t: place.get(`${e.to}@${lag ? 1 : 0}`) };
+  });
+  const sameRow = ({ s, t }) => Math.abs(s.y - t.y) < 4;
+  const adjacent = (end) => sameRow(end) && end.t.x > end.s.x && end.t.x - (end.s.x + end.s.w) < 48;
+  const spread = (list, key, pick) => {
+    const groups = new Map();
+    for (const end of list) groups.set(key(end), [...(groups.get(key(end)) ?? []), end]);
+    const at = new Map();
+    for (const members of groups.values()) {
+      const sorted = [...members].sort((p, q) => pick(p) - pick(q));
+      sorted.forEach((end, i) => at.set(end, (i + 1) / (sorted.length + 1)));
+    }
+    return at;
+  };
+  const vertical = ends.filter((end) => !adjacent(end));
+  const outAt = spread(vertical, (end) => end.e.from, (end) => end.t.x);
+  const inAt = spread(vertical, (end) => `${end.e.to}@${end.lag ? 1 : 0}`, (end) => end.s.x);
+  const paths = ends.map((end) => {
+    const { e, lag, s, t } = end;
+    let d;
+    if (adjacent(end)) {
+      const y1 = s.y + s.h / 2;
+      const y2 = t.y + t.h / 2;
+      d = `M${s.x + s.w},${y1} C${s.x + s.w + 18},${y1} ${t.x - 18},${y2} ${t.x - 2},${y2}`;
+    } else {
+      const x2 = t.x + t.w * (0.2 + 0.6 * inAt.get(end));
+      if (lag && sameRow(end)) {
+        const x1 = s.x + s.w * (0.2 + 0.6 * outAt.get(end));
+        const lift = 18 + Math.min(8, Math.abs(x2 - x1) / 80);
+        d = `M${x1},${s.y + s.h} C${x1},${s.y + s.h + lift} ${x2},${t.y + t.h + lift} ${x2},${t.y + t.h + 2}`;
+      } else if (sameRow(end)) {
+        const x1 = s.x + s.w * (0.2 + 0.6 * outAt.get(end));
+        const lift = 22 + Math.min(10, Math.abs(x2 - x1) / 60);
+        d = `M${x1},${s.y} C${x1},${s.y - lift} ${x2},${t.y - lift} ${x2},${t.y - 2}`;
+      } else {
+        const x1 = s.x + s.w * (0.2 + 0.6 * outAt.get(end));
+        const y1 = s.y + s.h;
+        const bend = Math.max(24, (t.y - y1) / 2.5);
+        d = `M${x1},${y1} C${x1},${y1 + bend} ${x2},${t.y - bend} ${x2},${t.y - 2}`;
+      }
+    }
+    return svg("path", { d, class: `edge${lag ? " lag" : ""}`, "data-from": e.from, "data-to": e.to, "marker-end": `url(#${lag ? "arrow-lag" : "arrow"})` });
+  });
+  const layer = host.querySelector("svg.edges");
+  layer.setAttribute("width", host.offsetWidth);
+  layer.setAttribute("height", host.offsetHeight);
+  layer.replaceChildren(svg("defs", {}, marker("arrow", "var(--edge)"), marker("arrow-lag", "var(--edge-lag)"), marker("arrow-on", "var(--hi)")), ...paths);
+}
+
+let edgeFrame = 0;
+new ResizeObserver(() => {
+  cancelAnimationFrame(edgeFrame);
+  edgeFrame = requestAnimationFrame(() => { if (graphBuilt) drawEdges(); });
+}).observe($("#graph"));
 
 $("#show-inputs").addEventListener("change", () => { graphBuilt = false; renderGraph(); });
 

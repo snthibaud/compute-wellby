@@ -107,19 +107,23 @@ table.data td.who { min-width: 210px; }
 .rho .mid { position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--axis); }
 .rho span { position: absolute; top: 3px; height: 8px; border-radius: 2px; }
 
-.graph-wrap { overflow: auto; background: var(--surface); border: 1px solid var(--ring); border-radius: 10px; max-height: 78vh; }
+.graph-wrap { background: var(--surface); border: 1px solid var(--ring); border-radius: 10px; padding: 12px 14px 4px; }
 .graph { position: relative; }
-.graph svg { position: absolute; left: 0; top: 0; overflow: visible; }
-.gnode { position: absolute; background: var(--surface); border: 1px solid var(--axis); border-radius: 8px; padding: 6px 9px; font-size: 12px; cursor: pointer; transition: border-color 0.12s, opacity 0.12s; }
-.gnode .gl { color: var(--ink-2); font-size: 11px; margin-bottom: 2px; white-space: nowrap; }
+.graph svg.edges { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; z-index: 0; }
+.gband { position: relative; z-index: 1; margin-bottom: 34px; }
+.gband-title { font-size: 12px; font-weight: 600; color: var(--ink-2); margin-bottom: 30px; }
+.gnodes { display: flex; flex-wrap: wrap; gap: 44px 34px; align-items: flex-start; }
+.gnode.ghost.first { margin-left: auto; }
+.gnode { position: relative; max-width: 100%; background: var(--surface); border: 1px solid var(--axis); border-radius: 8px; padding: 6px 9px; font-size: 12px; cursor: pointer; transition: border-color 0.12s, opacity 0.12s; }
+.gnode .gl { color: var(--ink-2); font-size: 11px; margin-bottom: 2px; }
 .gnode .gf { white-space: nowrap; }
+@media (max-width: 640px) { .gnode .gf { overflow-x: auto; overflow-y: hidden; padding-bottom: 3px; } }
 .gnode .gi { color: var(--muted); font-size: 11px; margin-top: 3px; white-space: nowrap; }
 .gnode.ghost { border-style: dashed; background: var(--bg); }
 .gnode.on { border-color: var(--hi); box-shadow: 0 0 0 1px var(--hi); }
 .graph.focus .gnode:not(.on):not(.near) { opacity: 0.35; }
 .graph.focus path.edge:not(.on) { opacity: 0.12; }
-.band-label { position: absolute; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
-.group-label { position: absolute; font-size: 12px; font-weight: 600; color: var(--ink-2); }
+@media (max-width: 640px) { .graph:not(.focus) path.edge { opacity: 0; } .gnode.ghost.first { margin-left: 0; } }
 path.edge { fill: none; stroke: var(--edge); stroke-width: 1.4; }
 path.edge.lag { stroke: var(--edge-lag); }
 path.edge.on { stroke: var(--hi); stroke-width: 2; }
