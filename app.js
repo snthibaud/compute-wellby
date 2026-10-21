@@ -208,7 +208,7 @@ function renderScenarios() {
       el("td", { class: "lab" }, el("span", { class: "key", style: `background: var(--series-${k})` }), `Name of ${k.toUpperCase()}`),
       el("td", { colspan: 2 }, el("input", { type: "text", value: side(k).name, "aria-label": `Name of scenario ${k.toUpperCase()}`, oninput: (e) => { side(k).name = e.target.value; renderLegend(); update(); } })))),
     el("tr", { class: "group" }, el("td", { colspan: 3, text: "Compute" })),
-    el("tr", {}, el("td", { class: "lab" }, el("span", { "data-help-lever": "cap", text: "Cap on compute growth, OOM/yr" })), ...["a", "b"].map((k) => {
+    el("tr", {}, el("td", { class: "lab" }, el("span", { "data-help-lever": "cap", text: "Cap on growth of the largest training run, OOM/yr" })), ...["a", "b"].map((k) => {
       const box = el("input", { type: "checkbox", checked: side(k).cap !== null, "aria-label": `Cap compute growth in ${k.toUpperCase()}` });
       const value = numberInput("cap", side(k).cap ?? 0.3, (v) => { side(k).cap = v; update(); });
       value.disabled = side(k).cap === null;
@@ -219,7 +219,7 @@ function renderScenarios() {
       });
       return el("td", {}, el("label", { class: "opt" }, box, "Cap"), value);
     })),
-    el("tr", {}, el("td", { class: "lab" }, el("span", { "data-help-lever": "shockstart", text: "Supply shock: start, years, share of growth lost" })), ...["a", "b"].map((k) => {
+    el("tr", {}, el("td", { class: "lab" }, el("span", { "data-help-lever": "shockstart", text: "Supply shock: start, years, share of new hardware lost" })), ...["a", "b"].map((k) => {
       const current = side(k).shock ?? { start: 2030, years: 3, severity: 0.8 };
       const box = el("input", { type: "checkbox", checked: side(k).shock !== null, "aria-label": `Supply shock in ${k.toUpperCase()}` });
       const fields = {
@@ -441,10 +441,11 @@ function renderOutcomes() {
     tile("Peak unemployment, median path", `${pct(peak(fans.a.unemployment), 1)} / ${pct(peak(fans.b.unemployment), 1)}`, "A / B"),
   );
   $("#charts").replaceChildren(
-    fanChart({ title: "Frontier effective compute", sub: "Orders of magnitude above the largest training run at the start of 2026", series: pair("effectiveCompute"), format: (v) => plain(v, 1) }),
-    fanChart({ title: "Share of today's tasks automated", series: pair("automatedShare"), format: (v) => pct(v) }),
+    fanChart({ title: "Largest training run", sub: "Orders of magnitude above the largest run at the end of 2025", series: pair("frontierOoms"), format: (v) => plain(v, 1) }),
+    fanChart({ title: "Share of tasks automated", sub: "Tasks AI can do that are worth handing to it", series: pair("automatedShare"), format: (v) => pct(v) }),
+    fanChart({ title: "AI's share of investment", sub: "Compute hardware and hardware and software R&D", series: pair("aiInvestmentShare"), format: (v) => pct(v) }),
     fanChart({ title: "Unemployment rate", series: pair("unemployment"), format: (v) => pct(v, 1), refs: refsFor("unemployment") }),
-    fanChart({ title: "Labor share of income", sub: "Tasks done by people keep more of their value as automated tasks become abundant", series: pair("laborShare"), format: (v) => pct(v, 1), refs: refsFor("laborShare") }),
+    fanChart({ title: "Labor share of income", sub: "1 − α times the share of task value still produced by people", series: pair("laborShare"), format: (v) => pct(v, 1), refs: refsFor("laborShare") }),
     fanChart({ title: "Growth of output per person", series: pair("growthRate"), format: (v) => pct(v, 1), refs: refsFor("growthRate"), zero: true }),
     fanChart({ title: "Output per person", sub: "Multiple of 2025, log scale", series: pair("outputPc"), log: true, format: (v) => `${compact(v)}x` }),
     fanChart({ title: "Consumption of a displaced worker", sub: "Multiple of 2025 output per person, log scale", series: pair("consDisplaced"), log: true, format: (v) => `${compact(v)}x` }),
@@ -564,7 +565,7 @@ function renderSwing(sw) {
 
 // ---------- model graph ----------
 
-const GROUPS = ["compute", "automation", "output", "labor", "income", "wellbeing"];
+const GROUPS = ["compute", "automation", "labor", "output", "investment", "income", "wellbeing"];
 let graphBuilt = false;
 let selectedNode = null;
 
@@ -747,17 +748,18 @@ function renderMethod() {
   ]);
   $("#method").replaceChildren(el("div", { class: "method" },
     el("h2", { text: "What this is" }),
-    el("p", { text: "A scenario explorer, not a forecast and not an advocacy tool. It follows one representative high-income economy from 2026 to 2060 in yearly steps: effective AI compute grows; the share of today's tasks AI can do follows compute on a logistic informed by Epoch AI's GATE model; output grows with automation; some newly automated work becomes job loss; incomes split between top-decile owners, employed workers and displaced workers; and life satisfaction follows log consumption, its relative part, and the non-pecuniary cost of unemployment." }),
+    el("p", { text: "A scenario explorer, not a forecast and not an advocacy tool. It follows the world economy from 2026 to 2060 in yearly steps, on the structure of Epoch AI's GATE model: investment in hardware and in hardware and software R&D grows effective compute; the largest training run sets which tasks AI can do; AI takes over those tasks where that raises output; output comes from a CES aggregate of human and digital work and from capital; and part of output is reinvested, so automation feeds back into compute. On top of that, some newly automated work becomes job loss; incomes split between top-decile owners, employed workers and displaced workers; and life satisfaction follows log consumption, its relative part, and the non-pecuniary cost of unemployment." }),
+    el("p", { text: "The engine follows the structure of GATE but does not fully adhere to it. For example, GATE chooses investment and the split of compute between training and inference with a forward-looking social planner; here both follow fixed rules, so investment in AI does not anticipate automation before it happens. The unemployment, income-distribution and wellbeing parts are additions GATE does not have." }),
     el("p", { text: "Every number the model is unsure of is a distribution over a 90% interval, tagged with how much evidence stands behind it. Each path draws all of them once. Both scenarios then run on that same path, so their difference comes from the levers alone. The page reports the spread of outcomes and which assumptions the spread tracks. The levers are inputs you set; nothing searches over them, and nothing here ranks them." }),
     el("h2", { text: "How the model compares with published forecasts" }),
-    el("p", { text: "These forecasts are a cross-check, not an input: nothing in the model reads them. The model takes its compute dynamics from GATE, which automates far faster than surveyed economists and AI researchers expect, so growth during the transition is much higher than they forecast and the automation milestones come earlier. Where it departs from them is part of what the page is for. Model figures are scenario A's median path from the current run." }),
+    el("p", { text: "These forecasts are a cross-check, not an input: nothing in the model reads them. The model follows GATE, which automates far faster than surveyed economists and AI researchers expect, so growth during the transition is much higher than they forecast and the automation milestones come earlier. Where it departs from them is part of what the page is for. Model figures are scenario A's median path from the current run." }),
     el("div", { id: "compare", class: "scroll" }),
     el("h2", { text: "The model, node by node" }),
     el("p", { text: "These formulas are typeset by the engine from the same expressions it evaluates; the model graph is drawn from them too. The subscript t is the calendar year, and t−1 is the year before." }),
     eqs,
     el("h3", { text: "Constants" }),
-    el("div", {}, D.constants.map((c) => el("span", { style: "margin-right: 18px" }, tex(`${c.symbol} = ${plain(c.value, 3)}`)))),
-    el("p", { class: "note", text: "ω is the population share of top-decile owners. ℓ₂₀ and ℓ₉₉ are the logits of 20% and 99%, the two points the automation logistic is anchored to." }),
+    el("div", {}, D.constants.map((c) => el("span", { style: "margin-right: 18px" }, tex(`${c.symbol} = ${compact(c.value)}`)))),
+    el("p", { class: "note", text: "ω is the population share of top-decile owners. Y₀, L₀ and C_T,0 are GATE's gross world product and labor force and Epoch's largest training run at the end of 2025; the others are values GATE fixes rather than samples. The root in f* is found numerically: the task share at which the expression changes sign." }),
     el("h2", { text: "Assumptions" }),
     el("p", { text: "Pin any of them to a value of your own; both scenarios use the pin, and the swing test leaves pinned assumptions out." }),
     el("div", { class: "scroll" }, el("table", { class: "data" },
@@ -775,15 +777,14 @@ function renderMethod() {
       el("thead", {}, el("tr", {}, ["", "Lever", "Range", "What it does"].map((h) => el("th", { text: h })))),
       el("tbody", {}, D.levers.map((l) => el("tr", {}, el("td", {}, tex(l.symbol)), el("td", { text: `${l.label}${l.unit ? ` (${l.unit})` : ""}` }), el("td", { class: "num", text: `${l.min} to ${l.max}` }), el("td", { text: l.note })))))),
     el("h2", { text: "How it runs" }),
-    el("p", { text: "The engine is a small Haskell library. Each formula is written once against a type class: at Double it is the arithmetic a path runs, and at a symbolic expression type it is the LaTeX on this page and the edges of the model graph. Thirteen QuickCheck properties guard its invariants, among them: identical scenarios differ by exactly zero, the typeset formula evaluates to the number the path uses, same-year reads only look backwards, automation never reverses, consumption adds up to output, unemployment stays a share, a tighter compute cap never automates more, the labor share stays a share, pinning one assumption leaves every other draw unchanged, and the input boundary rejects out-of-range levers by name. The library is compiled with GHC's WebAssembly backend and runs in a Web Worker in your browser; nothing is sent anywhere." }),
+    el("p", { text: "The engine is a small Haskell library. Each formula is written once against a type class: at Double it is the arithmetic a path runs, and at a symbolic expression type it is the LaTeX on this page and the edges of the model graph. Seventeen QuickCheck properties guard its invariants, among them: identical scenarios differ by exactly zero, the typeset formula evaluates to the number the path uses, same-year reads only look backwards, values without a year index stay constant along a path, the automatable share never reverses, only automatable tasks are automated, output is exactly spent on consumption, investment and retraining, every value stays finite, unemployment stays a share, a tighter compute cap never makes more tasks automatable, the labor share stays a share, pinning one assumption leaves every other draw unchanged, and the input boundary rejects out-of-range levers by name. The library is compiled with GHC's WebAssembly backend and runs in a Web Worker in your browser; nothing is sent anywhere." }),
     el("h2", { text: "Limitations" }),
     el("ul", {}, [
-      "One representative high-income economy: no trade, no other countries' compute, no export-control asymmetries between blocs.",
-      "Effective compute is one number. Data, energy and inference compute are folded into growth rates and a half-life rather than modelled.",
-      "Automation is a fixed logistic in log compute. New tasks that AI creates are not modelled, so job loss is likely overstated when automation is high.",
-      "Tasks done by people and by AI are complements, so the labor share falls only when nearly every task is automated. The supply of AI services per automated task is taken to grow one-for-one with frontier effective compute, which is a strong simplification of inference capacity.",
-      "Output follows a reduced-form multiple M rather than the same task aggregate that sets the labor share, so the two are not one consistent production system as in GATE.",
-      "Consumption equals income each year: no saving, no investment response, no endogenous AI investment as in GATE.",
+      "One world economy: no countries, trade or export controls, so a supply shock or a cap applies to all compute at once.",
+      "Effective compute is one number. Data and energy other than the heat limit are not modelled.",
+      "The saving rate is fixed, and investment splits between capital and AI by their output elasticities as returns appear; a planner that foresees automation, as in GATE, would invest in AI earlier and more.",
+      "New tasks that AI creates are not modelled, so job loss is likely overstated when automation is high.",
+      "Once nearly every task is automated, output grows with compute alone and can grow explosively until the heat limit binds, as in GATE; growth rates in that phase say more about the model's structure than about any forecast.",
       "Owners are a fixed top decile who do not work; workers hold the rest of the capital. Real wealth distributions are smoother and shift over time.",
       "Life satisfaction is log-linear in consumption with a relative part, and the WELLBY sum counts each person-year equally after discounting. Population, mortality and AI's direct effects on health, meaning and safety are not modelled.",
     ].map((t) => el("li", { text: t }))),
