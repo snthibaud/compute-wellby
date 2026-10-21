@@ -297,32 +297,70 @@ const W = 520;
 const H = 210;
 const M = { l: 52, r: 14, t: 10, b: 26 };
 
-function frame(xs, yLo, yHi, { log = false, format = compact, zero = false } = {}) {
-  const tf = log ? Math.log10 : (v) => v;
+// "growth" plots log(1 + v): a growth rate on a log scale, which keeps
+// both a 2% year and a 500% year readable and still allows negative growth.
+const SCALES = {
+  linear: { to: (v) => v, from: (u) => u },
+  log: { to: Math.log10, from: (u) => 10 ** u },
+  growth: { to: (v) => Math.log10(1 + v), from: (u) => 10 ** u - 1 },
+};
+
+// Ticks for a log-like scale, from round values in order of priority (no
+// growth, then powers of ten, then 5s, then 2s), each kept only if it is far
+// enough on the axis from every tick already kept.
+function scaleTicks(scale, lo, hi) {
+  const s = SCALES[scale];
+  const minGap = (hi - lo) / 6;
+  const powers = [];
+  for (let k = Math.floor(lo) - 2; k <= Math.ceil(hi) + 2; k += 1) powers.push(10 ** k);
+  const growthFloor = scale === "growth" ? [-0.5, -0.2, -0.1, -0.05, -0.02] : [];
+  const candidates = [
+    ...(scale === "growth" ? [0] : []),
+    ...powers,
+    ...powers.map((p) => 5 * p),
+    ...powers.map((p) => 2 * p),
+    ...growthFloor,
+  ];
+  const kept = [];
+  for (const v of candidates) {
+    const u = s.to(v);
+    if (Number.isFinite(u) && u >= lo && u <= hi && kept.every((k) => Math.abs(s.to(k) - u) >= minGap)) kept.push(v);
+  }
+  return kept.sort((p, q) => p - q);
+}
+
+function frame(xs, yLo, yHi, { scale = "linear", format = compact, zero = false } = {}) {
+  const tf = SCALES[scale].to;
   const [lo, hi] = [tf(yLo), tf(yHi)];
   const pad = (hi - lo) * 0.05 || 1;
   const domain = [lo - pad, hi + pad];
   const x = (i) => M.l + (i / (xs.length - 1)) * (W - M.l - M.r);
   const y = (v) => H - M.b - ((tf(v) - domain[0]) / (domain[1] - domain[0])) * (H - M.t - M.b);
-  const ticks = log
-    ? niceTicks(domain[0], domain[1], 4).filter((t) => Number.isInteger(t)).map((t) => 10 ** t)
-    : niceTicks(domain[0], domain[1], 4);
+  const ticks = scale === "linear" ? niceTicks(domain[0], domain[1], 4) : scaleTicks(scale, domain[0], domain[1]);
   const grid = svg("g", { class: "grid" }, ticks.map((t) => svg("line", { x1: M.l, x2: W - M.r, y1: y(t), y2: y(t) })));
   const axis = svg("g", { class: "axis" },
-    ticks.map((t) => svg("text", { x: M.l - 6, y: y(t) + 4, "text-anchor": "end" }, document.createTextNode(log ? `${compact(t)}x` : format(t)))),
+    ticks.map((t) => svg("text", { x: M.l - 6, y: y(t) + 4, "text-anchor": "end" }, document.createTextNode(format(t)))),
     xs.map((yr, i) => (yr % 10 === 0 ? svg("text", { x: x(i), y: H - 8, "text-anchor": "middle" }, document.createTextNode(String(yr))) : null)),
     svg("line", { x1: M.l, x2: W - M.r, y1: H - M.b, y2: H - M.b }),
-    zero && 0 >= domain[0] && 0 <= domain[1] ? svg("line", { x1: M.l, x2: W - M.r, y1: y(0), y2: y(0), "stroke-width": 1.5 }) : null,
+    zero && tf(0) >= domain[0] && tf(0) <= domain[1] ? svg("line", { x1: M.l, x2: W - M.r, y1: y(0), y2: y(0), "stroke-width": 1.5 }) : null,
   );
   return { x, y, grid, axis };
 }
 
-function fanChart({ title, sub, series, log = false, format = compact, zero = false, refs = [] }) {
+// A positive series spanning more than two orders of magnitude reads better
+// on a log scale.
+const autoScale = (series) => {
+  const all = series.flatMap((s) => [...s.fan.p10, ...s.fan.p90]);
+  const lo = Math.min(...all);
+  return lo > 0 && Math.max(...all) / lo > 100 ? "log" : "linear";
+};
+
+function fanChart({ title, sub, series, scale = "linear", format = compact, zero = false, refs = [] }) {
   const years = result.years;
   const all = series.flatMap((s) => [...s.fan.p10, ...s.fan.p90]).concat(refs.map((r) => r.value));
   const lo = Math.min(...all);
   const hi = Math.max(...all);
-  const f = frame(years, lo, hi, { log, format, zero });
+  const f = frame(years, lo, hi, { scale, format, zero });
   const marks = series.map((s) => {
     const area = years.map((_, i) => `${f.x(i)},${f.y(s.fan.p90[i])}`).concat(years.map((_, i) => `${f.x(years.length - 1 - i)},${f.y(s.fan.p10[years.length - 1 - i])}`));
     return svg("g", {},
@@ -446,9 +484,9 @@ function renderOutcomes() {
     fanChart({ title: "AI's share of investment", sub: "Compute hardware and hardware and software R&D", series: pair("aiInvestmentShare"), format: (v) => pct(v) }),
     fanChart({ title: "Unemployment rate", series: pair("unemployment"), format: (v) => pct(v, 1), refs: refsFor("unemployment") }),
     fanChart({ title: "Labor share of income", sub: "1 − α times the share of task value still produced by people", series: pair("laborShare"), format: (v) => pct(v, 1), refs: refsFor("laborShare") }),
-    fanChart({ title: "Growth of output per person", series: pair("growthRate"), format: (v) => pct(v, 1), refs: refsFor("growthRate"), zero: true }),
-    fanChart({ title: "Output per person", sub: "Multiple of 2025, log scale", series: pair("outputPc"), log: true, format: (v) => `${compact(v)}x` }),
-    fanChart({ title: "Consumption of a displaced worker", sub: "Multiple of 2025 output per person, log scale", series: pair("consDisplaced"), log: true, format: (v) => `${compact(v)}x` }),
+    fanChart({ title: "Growth of output per person", sub: "Log scale of one plus the growth rate, so slow and explosive years both show", series: pair("growthRate"), scale: "growth", format: (v) => pct(v, Math.abs(v) < 0.1 ? 1 : 0), refs: refsFor("growthRate"), zero: true }),
+    fanChart({ title: "Output per person", sub: "Multiple of 2025, log scale", series: pair("outputPc"), scale: "log", format: (v) => `${compact(v)}x` }),
+    fanChart({ title: "Consumption of a displaced worker", sub: "Multiple of 2025 output per person, log scale", series: pair("consDisplaced"), scale: "log", format: (v) => `${compact(v)}x` }),
     fanChart({ title: "Mean life satisfaction", sub: "0-10 scale, relative to an arbitrary zero: compare the scenarios, not the level", series: pair("lifeSat"), format: (v) => plain(v, 2) }),
     fanChart({ title: `Life satisfaction, B ${minus} A`, sub: `Per year, on the same paths: ${B} minus ${A}`, series: [{ key: "d", name: `B ${minus} A`, fan: deltaFans.lifeSat }], format: (v) => signed(v, 3), zero: true }),
     fanChart({ title: `Cumulative WELLBYs per person, B ${minus} A`, sub: "Discounted life-satisfaction-years since 2026", series: [{ key: "d", name: `B ${minus} A`, fan: deltaFans.wellby }], format: (v) => signed(v, 2), zero: true }),
@@ -705,6 +743,13 @@ function selectNode(id) {
   $("#node-detail").scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
+function detailChart(n) {
+  const series = [{ key: "a", name: "A", fan: result.fans.a[n.id] }, { key: "b", name: "B", fan: result.fans.b[n.id] }];
+  const scale = autoScale(series);
+  const sub = [n.unit, scale === "log" ? "log scale" : ""].filter(Boolean).join(", ");
+  return fanChart({ title: `${n.label} over time`, sub: sub || undefined, series, scale });
+}
+
 function refreshDetail() {
   if (!selectedNode) return;
   const n = D.nodeById[selectedNode];
@@ -723,7 +768,7 @@ function refreshDetail() {
     tex(n.formula, true),
     n.initial ? el("div", {}, el("span", { class: "note", text: "At the end of 2025: " }), tex(n.initial)) : null,
     reads.length ? el("table", { class: "data" }, el("thead", {}, el("tr", {}, el("th", { text: "Reads" }), el("th", {}), el("th", { class: "num", text: "90% interval" }), el("th", { text: "Basis" }))), el("tbody", {}, reads)) : null,
-    result ? el("div", { style: "margin-top: 10px; max-width: 620px" }, fanChart({ title: `${n.label} over time`, sub: n.unit || undefined, series: [{ key: "a", name: "A", fan: result.fans.a[n.id] }, { key: "b", name: "B", fan: result.fans.b[n.id] }] })) : null,
+    result ? el("div", { style: "margin-top: 10px; max-width: 620px" }, detailChart(n)) : null,
   ].filter(Boolean));
 }
 
