@@ -1002,6 +1002,10 @@ function renderMethod() {
 
 // ---------- start ----------
 
+// One fresh seed per visit: every edit within a visit reruns on the same
+// draws, so a change in the charts comes from the edit and not from new noise.
+const randomSeed = () => crypto.getRandomValues(new Uint32Array(1))[0] % 1000000;
+
 async function start() {
   const { reply } = await call({ kind: "describe" });
   if (reply.error) throw new Error(`describe was rejected: ${JSON.stringify(reply.error)}`);
@@ -1009,7 +1013,8 @@ async function start() {
   D.leverById = Object.fromEntries(D.levers.map((l) => [l.id, l]));
   D.rowByKey = Object.fromEntries(D.registry.map((r) => [r.key, r]));
   D.nodeById = Object.fromEntries(D.nodes.map((n) => [n.id, n]));
-  state = { ...structuredClone(D.defaults), preset: D.presets[0].id };
+  const defaults = structuredClone(D.defaults);
+  state = { ...defaults, settings: { ...defaults.settings, seed: randomSeed() }, preset: D.presets[0].id };
   renderScenarios();
   renderHero();
   renderSettings();
