@@ -50,10 +50,43 @@ const plain = (x, d = 2) => {
   return Number(digits) === 0 || x > 0 ? digits : minus + digits;
 };
 const pct = (x, d = 0) => (100 * x).toFixed(d) + "%";
+const SUPERSCRIPT = { "-": "⁻", 0: "⁰", 1: "¹", 2: "²", 3: "³", 4: "⁴", 5: "⁵", 6: "⁶", 7: "⁷", 8: "⁸", 9: "⁹" };
+const scientific = (x) => {
+  const [mantissa, exponent] = x.toExponential(1).split("e");
+  const power = `10${[...String(Number(exponent))].map((c) => SUPERSCRIPT[c]).join("")}`;
+  if (mantissa === "1.0") return power;
+  if (mantissa === "-1.0") return minus + power;
+  return `${mantissa.replace("-", minus)}×${power}`;
+};
 const compact = (x) => {
   const a = Math.abs(x);
-  if (a !== 0 && (a < 0.01 || a >= 10000)) return x.toExponential(1).replace("-", minus);
+  if (a !== 0 && (a < 0.01 || a >= 10000)) return scientific(x);
   return plain(x, a < 1 ? 3 : a < 10 ? 2 : a < 100 ? 1 : 0);
+};
+const texNumber = (x) => {
+  const a = Math.abs(x);
+  if (a === 0 || (a >= 0.01 && a < 10000)) return compact(x).replace(minus, "-");
+  const [mantissa, exponent] = x.toExponential(1).split("e");
+  return `${mantissa}\\times 10^{${Number(exponent)}}`;
+};
+const isRound = (x) => Math.abs(x - Math.round(x)) < 1e-9;
+const tidy = (x) => compact(x).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
+const tidyPct = (x) => {
+  const p = 100 * x;
+  return `${plain(p, isRound(p) ? 0 : Math.abs(p) < 1 ? 2 : 1)}%`;
+};
+const withSign = (format) => (x) => (x > 0 ? "+" : "") + format(x);
+
+// Tick and readout formats by the kind of unit the engine gives each node.
+const FORMATS = {
+  share: tidyPct,
+  perYear: tidyPct,
+  multiple: (x) => `${tidy(x)}×`,
+  ooms: tidy,
+  points: (x) => (isRound(x) ? plain(x, 0) : plain(x, Math.abs(x) < 0.1 ? 3 : 2)),
+  wellbys: (x) => (isRound(x) ? plain(x, 0) : plain(x, Math.abs(x) < 0.1 ? 3 : 2)),
+  pure: tidy,
+  quantity: tidy,
 };
 
 let D;
@@ -90,7 +123,8 @@ async function simulate() {
     return;
   }
   running = true;
-  status(`Running ${state.settings.paths} paths...`);
+  status(`Simulating ${state.settings.paths} futures...`);
+  $("#answer").classList.add("stale");
   const { reply, ms } = await call(request("simulate"));
   running = false;
   if (queued) {
@@ -103,9 +137,10 @@ async function simulate() {
     return;
   }
   result = reply.ok;
-  status(`${state.settings.paths} paths, both scenarios, in ${ms.toFixed(0)} ms, computed in your browser.`);
+  status(`${state.settings.paths} simulated futures, both scenarios, in ${ms.toFixed(0)} ms, computed in your browser.`);
   $("#swing-sub").textContent = "Not run for the current settings yet.";
   $("#swing").replaceChildren();
+  renderAnswer();
   renderOutcomes();
   renderDrivers();
   renderCompare();
@@ -177,13 +212,12 @@ $("#theme").addEventListener("click", () => {
 
 // ---------- tabs ----------
 
-for (const button of document.querySelectorAll(".tabs button")) {
-  button.addEventListener("click", () => {
-    for (const b of document.querySelectorAll(".tabs button")) b.setAttribute("aria-selected", String(b === button));
-    for (const t of document.querySelectorAll(".tab")) t.hidden = t.id !== `tab-${button.dataset.tab}`;
-    if (button.dataset.tab === "graph") renderGraph();
-  });
+function showTab(tab) {
+  for (const b of document.querySelectorAll(".tabs button")) b.setAttribute("aria-selected", String(b.dataset.tab === tab));
+  for (const t of document.querySelectorAll(".tab")) t.hidden = t.id !== `tab-${tab}`;
+  if (tab === "graph") renderGraph();
 }
+for (const button of document.querySelectorAll(".tabs button")) button.addEventListener("click", () => showTab(button.dataset.tab));
 
 // ---------- scenario editor ----------
 
@@ -201,12 +235,12 @@ function numberInput(lever, value, onChange, extra = {}) {
 
 function renderScenarios() {
   const side = (key) => state.scenarios[key];
-  const update = () => schedule();
+  const update = () => { markCustom(); schedule(); };
   const head = el("tr", {}, el("th", {}), ...["a", "b"].map((k) => el("th", {}, el("span", { class: "key", style: `background: var(--series-${k})` }), k.toUpperCase())));
   const rows = [
     ...["a", "b"].map((k) => el("tr", {},
       el("td", { class: "lab" }, el("span", { class: "key", style: `background: var(--series-${k})` }), `Name of ${k.toUpperCase()}`),
-      el("td", { colspan: 2 }, el("input", { type: "text", value: side(k).name, "aria-label": `Name of scenario ${k.toUpperCase()}`, oninput: (e) => { side(k).name = e.target.value; renderLegend(); update(); } })))),
+      el("td", { colspan: 2 }, el("input", { type: "text", value: side(k).name, "aria-label": `Name of scenario ${k.toUpperCase()}`, oninput: (e) => { side(k).name = e.target.value; update(); } })))),
     el("tr", { class: "group" }, el("td", { colspan: 3, text: "Compute" })),
     el("tr", {}, el("td", { class: "lab" }, el("span", { "data-help-lever": "cap", text: "Cap on growth of the largest training run, OOM/yr" })), ...["a", "b"].map((k) => {
       const box = el("input", { type: "checkbox", checked: side(k).cap !== null, "aria-label": `Cap compute growth in ${k.toUpperCase()}` });
@@ -244,7 +278,6 @@ function renderScenarios() {
         el("td", {}, numberInput(lever, side(k)[lever], (v) => { side(k)[lever] = v; update(); }, { label: `${label} in ${k.toUpperCase()}` }))))),
   ];
   $("#scenarios").replaceChildren(el("table", { class: "scen" }, el("thead", {}, head), el("tbody", {}, rows)));
-  renderLegend();
 }
 
 function renderSettings() {
@@ -265,20 +298,112 @@ $("#copy-ab").addEventListener("click", () => {
   state.scenarios.b = structuredClone(state.scenarios.a);
   state.scenarios.b.name = `${state.scenarios.a.name} (copy)`;
   renderScenarios();
+  markCustom();
   schedule();
 });
 $("#swap-ab").addEventListener("click", () => {
   [state.scenarios.a, state.scenarios.b] = [state.scenarios.b, state.scenarios.a];
   renderScenarios();
+  markCustom();
   schedule();
 });
 
+// ---------- questions ----------
+
+const presetById = (id) => D.presets.find((p) => p.id === id);
+
+function choosePreset(id) {
+  const p = presetById(id);
+  state.preset = id;
+  state.scenarios = structuredClone({ a: p.a.scenario, b: p.b.scenario });
+  renderScenarios();
+  renderHero();
+  schedule();
+}
+
+function markCustom() {
+  state.preset = "custom";
+  renderHero();
+}
+
+function renderPresets() {
+  const chip = (id, label) => el("button", {
+    type: "button", role: "radio", class: "chip", "aria-checked": String(state.preset === id), text: label,
+    onclick: () => (id === "custom" ? (markCustom(), $("#scen-h").scrollIntoView({ behavior: "smooth", block: "start" })) : choosePreset(id)),
+  });
+  $("#presets").replaceChildren(el("span", { class: "eyebrow", text: "Pick a question" }), ...D.presets.map((p) => chip(p.id, p.summary)), chip("custom", "Custom"));
+}
+
+const leverFacts = (sc) => [
+  ["cap", sc.cap === null ? "No cap on compute growth" : `Training-run growth capped at ${tidy(sc.cap)} OOM a year`],
+  ["shock", sc.shock === null ? "No supply shock" : `Supply shock ${sc.shock.start}–${sc.shock.start + sc.shock.years - 1}, ${pct(sc.shock.severity)} of new hardware lost`],
+  ["replacement", `Unemployment benefit ${pct(sc.replacement)} of the wage`],
+  ["retraining", `Retraining ${tidy(sc.retraining)}% of output`],
+  ["dividend", sc.dividend === 0 ? "No capital dividend" : `${pct(sc.dividend)} of capital income paid to everyone`],
+];
+
+function scenarioCard(k, description) {
+  const sc = state.scenarios[k];
+  const other = state.scenarios[k === "a" ? "b" : "a"];
+  const otherFacts = new Map(leverFacts(other));
+  return el("div", { class: `card card-${k}` },
+    el("div", { class: "card-name" }, el("span", { class: "tag", text: k.toUpperCase() }), sc.name),
+    description ? el("p", { text: description }) : null,
+    el("ul", { class: "facts" }, leverFacts(sc).map(([lever, text]) => el("li", { class: otherFacts.get(lever) === text ? "" : "differs", text }))));
+}
+
+function renderHero() {
+  renderPresets();
+  const p = presetById(state.preset);
+  $("#question").textContent = p ? p.question : "Your own question: how does wellbeing differ between scenarios A and B?";
+  $("#cards").replaceChildren(scenarioCard("a", p?.a.description), el("div", { class: "vs", text: "vs" }), scenarioCard("b", p?.b.description));
+  renderLegend();
+}
+
+function renderAnswer() {
+  const { delta } = result;
+  const n = state.settings.paths;
+  const B = state.scenarios.b.name;
+  const box = $("#answer");
+  box.classList.remove("stale");
+  const definition = el("p", { class: "def" },
+    el("strong", { text: "WELLBY: " }),
+    `one point of life satisfaction on a 0–10 scale, for one person, for one year. Years after 2026 are discounted at ${tidyPct(state.settings.discount)} a year.`);
+  if (delta.shareAbove === 0 && delta.shareBelow === 0) {
+    box.replaceChildren(el("div", { class: "big", text: "No difference" }), el("p", { text: `A and B give the same wellbeing in all ${n} simulated futures.` }), definition);
+    return;
+  }
+  const direction = delta.mean >= 0 ? "higher" : "lower";
+  box.replaceChildren(
+    el("div", { class: "big" }, signed(delta.mean), el("span", { class: "unit", text: " WELLBYs per person" })),
+    el("p", {},
+      `On average across ${n} simulated futures, wellbeing summed over 2026–2060 is ${plain(Math.abs(delta.mean))} WELLBYs per person ${direction} under B (${B}) than under A. `,
+      `In 90% of the futures the difference lies between ${signed(delta.p05)} and ${signed(delta.p95)}; ${aheadText(delta.shareAbove)}.`),
+    definition);
+}
+
+const aheadText = (share) => {
+  if (share === 0) return "B never comes out ahead";
+  if (share === 1) return "B comes out ahead in every one of them";
+  if (share < 0.01) return "B comes out ahead in under 1% of them";
+  if (share > 0.99) return "B comes out ahead in over 99% of them";
+  return `B comes out ahead in ${pct(share)} of them`;
+};
+
 function renderLegend() {
+  const n = state.settings.paths;
+  const line = (k) => el("span", { class: "item" }, el("i", { style: `background: var(--series-${k})` }), `${k.toUpperCase()}: ${state.scenarios[k].name}`);
   $("#legend").replaceChildren(
-    ...["a", "b"].map((k) => el("span", {}, el("i", { style: `background: var(--series-${k})` }), `${k.toUpperCase()}: ${state.scenarios[k].name}, median`)),
-    el("span", {}, el("b", { style: "background: var(--ink-2)" }), "shaded: 10th to 90th percentile of paths"),
-    el("span", {}, svg("svg", { viewBox: "0 0 14 14", width: 12, height: 12, style: "vertical-align: middle; margin-right: 6px", "aria-hidden": "true" }, svg("path", { d: "M7 1 L13 7 L7 13 L1 7 Z", fill: "none", stroke: "currentColor", "stroke-width": 1.6 })), "published forecast, see Method"),
-  );
+    el("div", { class: "items" },
+      line("a"), line("b"),
+      el("span", { class: "item" }, el("i", { style: "background: var(--series-d)" }), `B ${minus} A, within each future`),
+      el("span", { class: "item" }, el("b", { style: "background: var(--ink-2)" }), "middle 80% of futures"),
+      el("span", { class: "item" }, svg("svg", { viewBox: "0 0 14 14", width: 12, height: 12, "aria-hidden": "true" }, svg("path", { d: "M7 1 L13 7 L7 13 L1 7 Z", fill: "none", stroke: "currentColor", "stroke-width": 1.6 })), "published forecast")),
+    el("p", {},
+      el("strong", { text: "Lines" }), ` are the median of ${n} simulated futures. `,
+      el("strong", { text: "Shaded bands" }), ` hold the middle 80% of them (10th to 90th percentile). `,
+      `The model is unsure of ${D.registry.length} numbers, such as how fast algorithms improve or how much automation turns into job loss. Each simulated future draws all of them once from their ranges, and A and B run on the same draws, so a band shows how much an outcome depends on those unknowns. `,
+      el("a", { href: "#", onclick: (e) => { e.preventDefault(); showTab("drivers"); }, text: "Which unknowns matter most" }), "."));
 }
 
 // ---------- charts ----------
@@ -294,8 +419,8 @@ function niceTicks(lo, hi, count = 4) {
 }
 
 const W = 520;
-const H = 210;
-const M = { l: 52, r: 14, t: 10, b: 26 };
+const H = 240;
+const M = { l: 56, r: 14, t: 26, b: 42 };
 
 // "growth" plots log(1 + v): a growth rate on a log scale, which keeps
 // both a 2% year and a 500% year readable and still allows negative growth.
@@ -329,7 +454,11 @@ function scaleTicks(scale, lo, hi) {
   return kept.sort((p, q) => p - q);
 }
 
-function frame(xs, yLo, yHi, { scale = "linear", format = compact, zero = false } = {}) {
+const axisTitles = (yLabel, xLabel) => svg("g", { class: "axis titles" },
+  svg("text", { x: 0, y: 12 }, document.createTextNode(yLabel)),
+  svg("text", { x: M.l + (W - M.l - M.r) / 2, y: H - 4, "text-anchor": "middle" }, document.createTextNode(xLabel)));
+
+function frame(xs, yLo, yHi, { scale = "linear", format, zero = false, yLabel }) {
   const tf = SCALES[scale].to;
   const [lo, hi] = [tf(yLo), tf(yHi)];
   const pad = (hi - lo) * 0.05 || 1;
@@ -340,9 +469,10 @@ function frame(xs, yLo, yHi, { scale = "linear", format = compact, zero = false 
   const grid = svg("g", { class: "grid" }, ticks.map((t) => svg("line", { x1: M.l, x2: W - M.r, y1: y(t), y2: y(t) })));
   const axis = svg("g", { class: "axis" },
     ticks.map((t) => svg("text", { x: M.l - 6, y: y(t) + 4, "text-anchor": "end" }, document.createTextNode(format(t)))),
-    xs.map((yr, i) => (yr % 10 === 0 ? svg("text", { x: x(i), y: H - 8, "text-anchor": "middle" }, document.createTextNode(String(yr))) : null)),
+    xs.map((yr, i) => (yr % 10 === 0 ? svg("text", { x: x(i), y: H - M.b + 17, "text-anchor": "middle" }, document.createTextNode(String(yr))) : null)),
     svg("line", { x1: M.l, x2: W - M.r, y1: H - M.b, y2: H - M.b }),
     zero && tf(0) >= domain[0] && tf(0) <= domain[1] ? svg("line", { x1: M.l, x2: W - M.r, y1: y(0), y2: y(0), "stroke-width": 1.5 }) : null,
+    axisTitles(yLabel, "Year"),
   );
   return { x, y, grid, axis };
 }
@@ -355,12 +485,16 @@ const autoScale = (series) => {
   return lo > 0 && Math.max(...all) / lo > 100 ? "log" : "linear";
 };
 
-function fanChart({ title, sub, series, scale = "linear", format = compact, zero = false, refs = [] }) {
+// A chart's axis title and number format come from the node's unit; a
+// difference B - A is signed and says so in its axis title.
+function fanChart({ title, sub, series, unit, difference = false, scale = "linear", zero = difference, refs = [] }) {
   const years = result.years;
+  const format = difference ? withSign(FORMATS[unit.kind]) : FORMATS[unit.kind];
+  const yLabel = difference ? `B ${minus} A, ${/^[A-Z][a-z]/.test(unit.label) ? unit.label[0].toLowerCase() + unit.label.slice(1) : unit.label}` : unit.label;
   const all = series.flatMap((s) => [...s.fan.p10, ...s.fan.p90]).concat(refs.map((r) => r.value));
   const lo = Math.min(...all);
   const hi = Math.max(...all);
-  const f = frame(years, lo, hi, { scale, format, zero });
+  const f = frame(years, lo, hi, { scale, format, zero, yLabel });
   const marks = series.map((s) => {
     const area = years.map((_, i) => `${f.x(i)},${f.y(s.fan.p90[i])}`).concat(years.map((_, i) => `${f.x(years.length - 1 - i)},${f.y(s.fan.p10[years.length - 1 - i])}`));
     return svg("g", {},
@@ -389,13 +523,13 @@ function fanChart({ title, sub, series, scale = "linear", format = compact, zero
     series.forEach((s, j) => { dots[j].setAttribute("cx", f.x(i)); dots[j].setAttribute("cy", f.y(s.fan.p50[i])); dots[j].setAttribute("visibility", "visible"); });
     readout.replaceChildren(el("strong", { text: String(years[i]) }), ...series.flatMap((s) => [
       "  ", el("span", { class: "lkey", style: `background: var(--series-${s.key})` }), `${s.name} ${format(s.fan.p50[i])} `,
-      el("span", { style: "color: var(--muted)", text: `(${format(s.fan.p10[i])} to ${format(s.fan.p90[i])})` }),
+      el("span", { style: "color: var(--muted)", text: `(80% band ${format(s.fan.p10[i])} to ${format(s.fan.p90[i])})` }),
     ]));
   };
   const hide = () => {
     cross.setAttribute("visibility", "hidden");
     for (const d of dots) d.setAttribute("visibility", "hidden");
-    readout.replaceChildren(el("span", { style: "color: var(--muted)", text: `${years[years.length - 1]}: ` }), ...series.flatMap((s) => [el("span", { class: "lkey", style: `background: var(--series-${s.key})` }), `${s.name} ${format(s.fan.p50[years.length - 1])}  `]));
+    readout.replaceChildren(el("span", { style: "color: var(--muted)", text: `${years[years.length - 1]} median: ` }), ...series.flatMap((s) => [el("span", { class: "lkey", style: `background: var(--series-${s.key})` }), `${s.name} ${format(s.fan.p50[years.length - 1])}  `]));
   };
   let at = years.length - 1;
   hit.addEventListener("pointermove", (e) => {
@@ -419,39 +553,42 @@ function fanChart({ title, sub, series, scale = "linear", format = compact, zero
   return card;
 }
 
-function histogram({ title, sub, edges, counts }) {
-  const n = counts.length;
+function histogram({ title, sub, edges, counts, xLabel }) {
   const total = counts.reduce((a, b) => a + b, 0);
-  const maxC = Math.max(...counts);
+  const shares = counts.map((c) => c / total);
+  const maxS = Math.max(...shares);
   const lo = edges[0];
   const hi = edges[edges.length - 1];
   const x = (v) => M.l + ((v - lo) / (hi - lo || 1)) * (W - M.l - M.r);
-  const y = (c) => H - M.b - (c / maxC) * (H - M.t - M.b);
-  const ticks = niceTicks(lo, hi, 5).filter((t) => t >= lo && t <= hi);
+  const y = (v) => H - M.b - (v / maxS) * (H - M.t - M.b);
+  const xTicks = niceTicks(lo, hi, 5).filter((t) => t >= lo && t <= hi);
+  const yTicks = niceTicks(0, maxS, 3).filter((t) => t <= maxS);
   const bars = counts.map((c, i) => {
     const x0 = x(edges[i]) + 1;
     const w = Math.max(1, Math.min(24, x(edges[i + 1]) - x(edges[i]) - 2));
-    const h = H - M.b - y(c);
+    const top = y(shares[i]);
+    const h = H - M.b - top;
     const r = Math.min(4, w / 2, h);
-    const top = y(c);
     const d = h <= 0 ? "" : `M${x0},${H - M.b} V${top + r} Q${x0},${top} ${x0 + r},${top} H${x0 + w - r} Q${x0 + w},${top} ${x0 + w},${top + r} V${H - M.b} Z`;
     const bar = svg("path", { d, fill: "var(--series-d)" });
     const target = svg("rect", { x: x(edges[i]), y: M.t, width: Math.max(2, x(edges[i + 1]) - x(edges[i])), height: H - M.t - M.b, fill: "transparent" });
     target.addEventListener("pointermove", (e) => tipAt(e.clientX, e.clientY, [
-      el("div", { class: "row" }, el("strong", { text: `${c} paths` }), el("span", { text: `(${pct(c / total, 1)})` })),
-      el("div", { text: `B ${minus} A between ${signed(edges[i])} and ${signed(edges[i + 1])} WELLBY` }),
+      el("div", { class: "row" }, el("strong", { text: `${c} of ${total} futures` }), el("span", { text: `(${pct(shares[i], 1)})` })),
+      el("div", { text: `B ${minus} A between ${signed(edges[i])} and ${signed(edges[i + 1])} WELLBYs per person` }),
     ]));
     target.addEventListener("pointerleave", hideTip);
     return svg("g", {}, bar, target);
   });
+  const grid = svg("g", { class: "grid" }, yTicks.map((t) => svg("line", { x1: M.l, x2: W - M.r, y1: y(t), y2: y(t) })));
   const axis = svg("g", { class: "axis" },
-    ticks.map((t) => svg("text", { x: x(t), y: H - 8, "text-anchor": "middle" }, document.createTextNode(signed(t, Math.abs(hi - lo) < 1 ? 2 : 1)))),
+    yTicks.map((t) => svg("text", { x: M.l - 6, y: y(t) + 4, "text-anchor": "end" }, document.createTextNode(tidyPct(t)))),
+    xTicks.map((t) => svg("text", { x: x(t), y: H - M.b + 17, "text-anchor": "middle" }, document.createTextNode(signed(t, Math.abs(hi - lo) < 1 ? 2 : 1)))),
     svg("line", { x1: M.l, x2: W - M.r, y1: H - M.b, y2: H - M.b }),
     lo <= 0 && hi >= 0 ? svg("line", { x1: x(0), x2: x(0), y1: M.t, y2: H - M.b, "stroke-width": 1.5 }) : null,
-    lo <= 0 && hi >= 0 ? svg("text", { x: x(0) + 4, y: M.t + 10 }, document.createTextNode("no difference")) : null,
+    axisTitles("Share of simulated futures", xLabel),
   );
   return el("div", { class: "chart" }, el("h3", { text: title }), el("div", { class: "sub", text: sub }),
-    svg("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": title }, axis, bars));
+    svg("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": title }, grid, axis, bars));
 }
 
 function firstYearAtLeast(fan, threshold) {
@@ -466,31 +603,33 @@ function tile(k, v, s) {
 const refsFor = (node) => D.references.filter((r) => r.kind === "atYear" && r.node === node);
 
 function renderOutcomes() {
-  const { fans, deltaFans, delta, finals } = result;
-  const A = state.scenarios.a.name;
-  const B = state.scenarios.b.name;
-  const pair = (node) => [{ key: "a", name: "A", fan: fans.a[node] }, { key: "b", name: "B", fan: fans.b[node] }];
+  const { fans, deltaFans, delta } = result;
+  const unit = (id) => D.nodeById[id].unit;
+  const pair = (id) => ({ unit: unit(id), series: [{ key: "a", name: "A", fan: fans.a[id] }, { key: "b", name: "B", fan: fans.b[id] }] });
+  const difference = (id) => ({ unit: unit(id), difference: true, series: [{ key: "d", name: `B ${minus} A`, fan: deltaFans[id] }] });
   const peak = (fan) => Math.max(...fan.p50);
-  const equal = 1 - delta.shareAbove - delta.shareBelow;
+  const last = (fan) => fan.p50[fan.p50.length - 1];
+  renderLegend();
+  $("#answer-charts").replaceChildren(
+    fanChart({ title: `Wellbeing gained or lost so far, B ${minus} A`, sub: "Cumulative WELLBYs per person since 2026, compared within each simulated future", ...difference("wellby") }),
+    histogram({ title: "Where the futures end up by 2060", sub: `How the ${state.settings.paths} simulated futures spread over the final difference; the dark line marks no difference`, edges: delta.edges, counts: delta.counts, xLabel: `B ${minus} A by 2060, WELLBYs per person` }),
+    fanChart({ title: `Life satisfaction each year, B ${minus} A`, sub: "Population mean, compared within each simulated future", ...difference("lifeSat") }),
+  );
   $("#tiles").replaceChildren(
-    tile(`WELLBYs per person, B ${minus} A, 2026 to 2060`, signed(delta.mean), `mean; 90% of paths between ${signed(delta.p05)} and ${signed(delta.p95)}`),
-    tile("Paths where B ends higher", pct(delta.shareAbove), `lower on ${pct(delta.shareBelow)}${equal > 0.0005 ? `, equal on ${pct(equal)}` : ""}`),
-    tile("Automation passes 50%, median path", `${firstYearAtLeast(fans.a.automatedShare, 0.5)} / ${firstYearAtLeast(fans.b.automatedShare, 0.5)}`, "A / B"),
-    tile("Peak unemployment, median path", `${pct(peak(fans.a.unemployment), 1)} / ${pct(peak(fans.b.unemployment), 1)}`, "A / B"),
+    tile("Year automation passes 50% of tasks", `${firstYearAtLeast(fans.a.automatedShare, 0.5)} / ${firstYearAtLeast(fans.b.automatedShare, 0.5)}`, "A / B, median future"),
+    tile("Peak unemployment", `${tidyPct(peak(fans.a.unemployment))} / ${tidyPct(peak(fans.b.unemployment))}`, "A / B, median future"),
+    tile(`Output per person in ${result.years[result.years.length - 1]}`, `${FORMATS.multiple(last(fans.a.outputPc))} / ${FORMATS.multiple(last(fans.b.outputPc))}`, "A / B, multiple of 2025, median future"),
   );
   $("#charts").replaceChildren(
-    fanChart({ title: "Largest training run", sub: "Orders of magnitude above the largest run at the end of 2025", series: pair("frontierOoms"), format: (v) => plain(v, 1) }),
-    fanChart({ title: "Share of tasks automated", sub: "Tasks AI can do that are worth handing to it", series: pair("automatedShare"), format: (v) => pct(v) }),
-    fanChart({ title: "AI's share of investment", sub: "Compute hardware and hardware and software R&D", series: pair("aiInvestmentShare"), format: (v) => pct(v) }),
-    fanChart({ title: "Unemployment rate", series: pair("unemployment"), format: (v) => pct(v, 1), refs: refsFor("unemployment") }),
-    fanChart({ title: "Labor share of income", sub: "1 − α times the share of task value still produced by people", series: pair("laborShare"), format: (v) => pct(v, 1), refs: refsFor("laborShare") }),
-    fanChart({ title: "Growth of output per person", sub: "Log scale of one plus the growth rate, so slow and explosive years both show", series: pair("growthRate"), scale: "growth", format: (v) => pct(v, Math.abs(v) < 0.1 ? 1 : 0), refs: refsFor("growthRate"), zero: true }),
-    fanChart({ title: "Output per person", sub: "Multiple of 2025, log scale", series: pair("outputPc"), scale: "log", format: (v) => `${compact(v)}x` }),
-    fanChart({ title: "Consumption of a displaced worker", sub: "Multiple of 2025 output per person, log scale", series: pair("consDisplaced"), scale: "log", format: (v) => `${compact(v)}x` }),
-    fanChart({ title: "Mean life satisfaction", sub: "0-10 scale, relative to an arbitrary zero: compare the scenarios, not the level", series: pair("lifeSat"), format: (v) => plain(v, 2) }),
-    fanChart({ title: `Life satisfaction, B ${minus} A`, sub: `Per year, on the same paths: ${B} minus ${A}`, series: [{ key: "d", name: `B ${minus} A`, fan: deltaFans.lifeSat }], format: (v) => signed(v, 3), zero: true }),
-    fanChart({ title: `Cumulative WELLBYs per person, B ${minus} A`, sub: "Discounted life-satisfaction-years since 2026", series: [{ key: "d", name: `B ${minus} A`, fan: deltaFans.wellby }], format: (v) => signed(v, 2), zero: true }),
-    histogram({ title: `Paths by final difference, B ${minus} A`, sub: `Cumulative WELLBYs per person by 2060; scenario means A ${plain(finals.a.mean)} and B ${plain(finals.b.mean)}`, edges: delta.edges, counts: delta.counts }),
+    fanChart({ title: "Largest AI training run", sub: "Above the largest run at the end of 2025 (about 5e26 FLOP); +1 OOM is 10 times the compute", ...pair("frontierOoms") }),
+    fanChart({ title: "Share of tasks automated", sub: "Tasks AI can do that are worth handing to it", ...pair("automatedShare") }),
+    fanChart({ title: "AI's share of investment", sub: "Compute hardware and hardware and software R&D", ...pair("aiInvestmentShare") }),
+    fanChart({ title: "Unemployment rate", ...pair("unemployment"), refs: refsFor("unemployment") }),
+    fanChart({ title: "Labor share of income", sub: "1 − α times the share of task value still produced by people", ...pair("laborShare"), refs: refsFor("laborShare") }),
+    fanChart({ title: "Growth of output per person", sub: "Log scale of one plus the growth rate, so slow and explosive years both show", ...pair("growthRate"), scale: "growth", refs: refsFor("growthRate"), zero: true }),
+    fanChart({ title: "Output per person", sub: "Log scale", ...pair("outputPc"), scale: "log" }),
+    fanChart({ title: "Consumption of a displaced worker", sub: "Log scale", ...pair("consDisplaced"), scale: "log" }),
+    fanChart({ title: "Mean life satisfaction", sub: "Its zero is arbitrary: compare A with B, not the level", ...pair("lifeSat") }),
   );
 }
 
@@ -565,14 +704,14 @@ function renderDrivers() {
 $("#run-swing").addEventListener("click", async () => {
   const button = $("#run-swing");
   button.disabled = true;
-  $("#swing-sub").textContent = `Running ${D.defaults.swingPaths} paths for each end of each assumption...`;
+  $("#swing-sub").textContent = `Simulating ${D.defaults.swingPaths} futures for each end of each assumption...`;
   const { reply, ms } = await call(request("swing", D.defaults.swingPaths));
   button.disabled = false;
   if (reply.error) {
     $("#swing-sub").textContent = errorText(reply.error);
     return;
   }
-  $("#swing-sub").textContent = `Mean B ${minus} A in cumulative WELLBYs with one assumption pinned, ${D.defaults.swingPaths} paths, ${(ms / 1000).toFixed(1)} s. The line marks the mean with nothing pinned; the circle is the 10th-percentile pin and the diamond the 90th. Pinned assumptions are left out.`;
+  $("#swing-sub").textContent = `Mean B ${minus} A in cumulative WELLBYs with one assumption pinned, ${D.defaults.swingPaths} simulated futures, ${(ms / 1000).toFixed(1)} s. The line marks the mean with nothing pinned; the circle is the 10th-percentile pin and the diamond the 90th. Pinned assumptions are left out.`;
   renderSwing(reply.ok);
 });
 
@@ -746,8 +885,7 @@ function selectNode(id) {
 function detailChart(n) {
   const series = [{ key: "a", name: "A", fan: result.fans.a[n.id] }, { key: "b", name: "B", fan: result.fans.b[n.id] }];
   const scale = autoScale(series);
-  const sub = [n.unit, scale === "log" ? "log scale" : ""].filter(Boolean).join(", ");
-  return fanChart({ title: `${n.label} over time`, sub: sub || undefined, series, scale });
+  return fanChart({ title: `${n.label} over time`, sub: scale === "log" ? "Log scale" : undefined, series, unit: n.unit, scale });
 }
 
 function refreshDetail() {
@@ -795,7 +933,7 @@ function renderMethod() {
     el("h2", { text: "What this is" }),
     el("p", { text: "A scenario explorer, not a forecast and not an advocacy tool. It follows the world economy from 2026 to 2060 in yearly steps, on the structure of Epoch AI's GATE model: investment in hardware and in hardware and software R&D grows effective compute; the largest training run sets which tasks AI can do; AI takes over those tasks where that raises output; output comes from a CES aggregate of human and digital work and from capital; and part of output is reinvested, so automation feeds back into compute. On top of that, some newly automated work becomes job loss; incomes split between top-decile owners, employed workers and displaced workers; and life satisfaction follows log consumption, its relative part, and the non-pecuniary cost of unemployment." }),
     el("p", { text: "The engine follows the structure of GATE but does not fully adhere to it. For example, GATE chooses investment and the split of compute between training and inference with a forward-looking social planner; here both follow fixed rules, so investment in AI does not anticipate automation before it happens. The unemployment, income-distribution and wellbeing parts are additions GATE does not have." }),
-    el("p", { text: "Every number the model is unsure of is a distribution over a 90% interval, tagged with how much evidence stands behind it. Each path draws all of them once. Both scenarios then run on that same path, so their difference comes from the levers alone. The page reports the spread of outcomes and which assumptions the spread tracks. The levers are inputs you set; nothing searches over them, and nothing here ranks them." }),
+    el("p", { text: "Every number the model is unsure of is a distribution over a 90% interval, tagged with how much evidence stands behind it. Each path, one simulated future, draws all of them once. Both scenarios then run on that same path, so their difference comes from the levers alone. The page reports the spread of outcomes and which assumptions the spread tracks. The levers are inputs you set; nothing searches over them, and nothing here ranks them." }),
     el("h2", { text: "How the model compares with published forecasts" }),
     el("p", { text: "These forecasts are a cross-check, not an input: nothing in the model reads them. The model follows GATE, which automates far faster than surveyed economists and AI researchers expect, so growth during the transition is much higher than they forecast and the automation milestones come earlier. Where it departs from them is part of what the page is for. Model figures are scenario A's median path from the current run." }),
     el("div", { id: "compare", class: "scroll" }),
@@ -806,7 +944,7 @@ function renderMethod() {
     el("p", { class: "note", text: "The share of tasks automated, f*, is the task φ at which an expression changes sign, found numerically. That expression uses two functions of φ, shown by name in its formula and defined here: Z(φ) is the runtime cost aggregate Z with φ in place of f*, and R(φ) is the runtime requirement of task φ. The subscript 0 marks the 2025 state." }),
     D.functions.map((f) => el("div", { class: "eq" }, tex(`${f.name} = ${f.definition}`, true))),
     el("h3", { text: "Constants" }),
-    el("div", {}, D.constants.map((c) => el("span", { style: "margin-right: 18px" }, tex(`${c.symbol} = ${compact(c.value)}`)))),
+    el("div", {}, D.constants.map((c) => el("span", { style: "margin-right: 18px" }, tex(`${c.symbol} = ${texNumber(c.value)}`)))),
     el("p", { class: "note", text: "ω is the population share of top-decile owners. Y₀, L₀ and C_T,0 are GATE's gross world product and labor force and Epoch's largest training run at the end of 2025; the others are values GATE fixes rather than samples." }),
     el("h2", { text: "Assumptions" }),
     el("p", { text: "Pin any of them to a value of your own; both scenarios use the pin, and the swing test leaves pinned assumptions out." }),
@@ -848,8 +986,9 @@ async function start() {
   D.leverById = Object.fromEntries(D.levers.map((l) => [l.id, l]));
   D.rowByKey = Object.fromEntries(D.registry.map((r) => [r.key, r]));
   D.nodeById = Object.fromEntries(D.nodes.map((n) => [n.id, n]));
-  state = structuredClone(D.defaults);
+  state = { ...structuredClone(D.defaults), preset: D.presets[0].id };
   renderScenarios();
+  renderHero();
   renderSettings();
   renderMethod();
   await simulate();
