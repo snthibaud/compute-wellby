@@ -81,7 +81,7 @@ const withSign = (format) => (x) => (x > 0 ? "+" : "") + format(x);
 const FORMATS = {
   share: tidyPct,
   perYear: tidyPct,
-  multiple: (x) => `${tidy(x)}×`,
+  multiple: tidy,
   ooms: tidy,
   points: (x) => (isRound(x) ? plain(x, 0) : plain(x, Math.abs(x) < 0.1 ? 3 : 2)),
   wellbys: (x) => (isRound(x) ? plain(x, 0) : plain(x, Math.abs(x) < 0.1 ? 3 : 2)),
@@ -326,10 +326,16 @@ function markCustom() {
   renderHero();
 }
 
+function openCustomize() {
+  markCustom();
+  $("#customize").open = true;
+  $("#customize").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
 function renderPresets() {
   const chip = (id, label) => el("button", {
     type: "button", role: "radio", class: "chip", "aria-checked": String(state.preset === id), text: label,
-    onclick: () => (id === "custom" ? (markCustom(), $("#scen-h").scrollIntoView({ behavior: "smooth", block: "start" })) : choosePreset(id)),
+    onclick: () => (id === "custom" ? openCustomize() : choosePreset(id)),
   });
   $("#presets").replaceChildren(el("span", { class: "eyebrow", text: "Pick a question" }), ...D.presets.map((p) => chip(p.id, p.summary)), chip("custom", "Custom"));
 }
@@ -348,8 +354,9 @@ function scenarioCard(k, description) {
   const otherFacts = new Map(leverFacts(other));
   return el("div", { class: `card card-${k}` },
     el("div", { class: "card-name" }, el("span", { class: "tag", text: k.toUpperCase() }), sc.name),
-    description ? el("p", { text: description }) : null,
-    el("ul", { class: "facts" }, leverFacts(sc).map(([lever, text]) => el("li", { class: otherFacts.get(lever) === text ? "" : "differs", text }))));
+    description
+      ? el("p", { text: description })
+      : el("ul", { class: "facts" }, leverFacts(sc).map(([lever, text]) => el("li", { class: otherFacts.get(lever) === text ? "" : "differs", text }))));
 }
 
 function renderHero() {
@@ -399,11 +406,13 @@ function renderLegend() {
       el("span", { class: "item" }, el("i", { style: "background: var(--series-d)" }), `B ${minus} A, within each future`),
       el("span", { class: "item" }, el("b", { style: "background: var(--ink-2)" }), "middle 80% of futures"),
       el("span", { class: "item" }, svg("svg", { viewBox: "0 0 14 14", width: 12, height: 12, "aria-hidden": "true" }, svg("path", { d: "M7 1 L13 7 L7 13 L1 7 Z", fill: "none", stroke: "currentColor", "stroke-width": 1.6 })), "published forecast")),
-    el("p", {},
-      el("strong", { text: "Lines" }), ` are the median of ${n} simulated futures. `,
-      el("strong", { text: "Shaded bands" }), ` hold the middle 80% of them (10th to 90th percentile). `,
-      `The model is unsure of ${D.registry.length} numbers, such as how fast algorithms improve or how much automation turns into job loss. Each simulated future draws all of them once from their ranges, and A and B run on the same draws, so a band shows how much an outcome depends on those unknowns. `,
-      el("a", { href: "#", onclick: (e) => { e.preventDefault(); showTab("drivers"); }, text: "Which unknowns matter most" }), "."));
+    el("p", {}, `Lines are the median of ${n} simulated futures; shaded bands hold the middle 80% of them.`),
+    el("details", {},
+      el("summary", { text: "Why a band?" }),
+      el("p", {},
+        `The model is unsure of ${D.registry.length} numbers, such as how fast algorithms improve or how much automation turns into job loss. Each simulated future draws all of them once from their ranges, and A and B run on the same draws, so a band shows how much an outcome depends on those unknowns. The `,
+        el("a", { href: "#", onclick: (e) => { e.preventDefault(); showTab("drivers"); }, text: "What drives the spread" }),
+        " tab shows which of them matter most.")));
 }
 
 // ---------- charts ----------
@@ -621,15 +630,17 @@ function renderOutcomes() {
     tile(`Output per person in ${result.years[result.years.length - 1]}`, `${FORMATS.multiple(last(fans.a.outputPc))} / ${FORMATS.multiple(last(fans.b.outputPc))}`, "A / B, multiple of 2025, median future"),
   );
   $("#charts").replaceChildren(
-    fanChart({ title: "Largest AI training run", sub: "Above the largest run at the end of 2025 (about 5e26 FLOP); +1 OOM is 10 times the compute", ...pair("frontierOoms") }),
     fanChart({ title: "Share of tasks automated", sub: "Tasks AI can do that are worth handing to it", ...pair("automatedShare") }),
+    fanChart({ title: "Unemployment rate", sub: "Share of workers without a job", ...pair("unemployment"), refs: refsFor("unemployment") }),
+    fanChart({ title: "Output per person", sub: "Log scale", ...pair("outputPc"), scale: "log" }),
+    fanChart({ title: "Mean life satisfaction", sub: "Its zero is arbitrary: compare A with B, not the level", ...pair("lifeSat") }),
+  );
+  $("#more-charts").replaceChildren(
+    fanChart({ title: "Largest AI training run", sub: "Above the largest run at the end of 2025 (about 5e26 FLOP); +1 OOM is 10 times the compute", ...pair("frontierOoms") }),
     fanChart({ title: "AI's share of investment", sub: "Compute hardware and hardware and software R&D", ...pair("aiInvestmentShare") }),
-    fanChart({ title: "Unemployment rate", ...pair("unemployment"), refs: refsFor("unemployment") }),
     fanChart({ title: "Labor share of income", sub: "1 − α times the share of task value still produced by people", ...pair("laborShare"), refs: refsFor("laborShare") }),
     fanChart({ title: "Growth of output per person", sub: "Log scale of one plus the growth rate, so slow and explosive years both show", ...pair("growthRate"), scale: "growth", refs: refsFor("growthRate"), zero: true }),
-    fanChart({ title: "Output per person", sub: "Log scale", ...pair("outputPc"), scale: "log" }),
     fanChart({ title: "Consumption of a displaced worker", sub: "Log scale", ...pair("consDisplaced"), scale: "log" }),
-    fanChart({ title: "Mean life satisfaction", sub: "Its zero is arbitrary: compare A with B, not the level", ...pair("lifeSat") }),
   );
 }
 
@@ -743,6 +754,15 @@ function renderSwing(sw) {
 // ---------- model graph ----------
 
 const GROUPS = ["compute", "automation", "labor", "output", "investment", "income", "wellbeing"];
+const GROUP_ORIGIN = {
+  compute: "from GATE",
+  automation: "from GATE",
+  labor: "added; the labor force is GATE's",
+  output: "from GATE",
+  investment: "simplified from GATE",
+  income: "added",
+  wellbeing: "added",
+};
 let graphBuilt = false;
 let selectedNode = null;
 
@@ -775,7 +795,9 @@ async function renderGraph() {
     box.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { selectNode(n.id); e.preventDefault(); } });
     return box;
   };
-  const band = (title, nodes) => el("div", { class: "gband" }, el("div", { class: "gband-title", text: title }), el("div", { class: "gnodes" }, nodes));
+  const band = (g, nodes) => el("div", { class: "gband" },
+    el("div", { class: "gband-title" }, g[0].toUpperCase() + g.slice(1), el("span", { class: `origin${GROUP_ORIGIN[g].startsWith("added") ? " added" : ""}`, text: GROUP_ORIGIN[g] })),
+    el("div", { class: "gnodes" }, nodes));
   const ghostsOf = (g) => D.nodes.filter((n) => n.group === g && ghosts.has(n.id)).map((n, i) => {
     const box = make(n, true);
     if (i === 0) box.classList.add("first");
@@ -783,7 +805,7 @@ async function renderGraph() {
   });
   host.replaceChildren(
     svg("svg", { class: "edges", "aria-hidden": "true" }),
-    ...GROUPS.map((g) => band(g[0].toUpperCase() + g.slice(1), [...D.nodes.filter((n) => n.group === g).map((n) => make(n, false)), ...ghostsOf(g)])),
+    ...GROUPS.map((g) => band(g, [...D.nodes.filter((n) => n.group === g).map((n) => make(n, false)), ...ghostsOf(g)])),
   );
   await document.fonts.ready;
   drawEdges();
@@ -931,6 +953,7 @@ function renderMethod() {
   ]);
   $("#method").replaceChildren(el("div", { class: "method" },
     el("h2", { text: "What this is" }),
+    el("p", {}, "Compute, automation and output follow ", el("a", { href: "https://arxiv.org/abs/2503.04941", target: "_blank", rel: "noopener", text: "Epoch AI's GATE model" }), " of AI and the economy; jobs, incomes and life satisfaction are a layer added on top. The model graph tags each group of nodes with where it comes from."),
     el("p", { text: "A scenario explorer, not a forecast and not an advocacy tool. It follows the world economy from 2026 to 2060 in yearly steps, on the structure of Epoch AI's GATE model: investment in hardware and in hardware and software R&D grows effective compute; the largest training run sets which tasks AI can do; AI takes over those tasks where that raises output; output comes from a CES aggregate of human and digital work and from capital; and part of output is reinvested, so automation feeds back into compute. On top of that, some newly automated work becomes job loss; incomes split between top-decile owners, employed workers and displaced workers; and life satisfaction follows log consumption, its relative part, and the non-pecuniary cost of unemployment." }),
     el("p", { text: "The engine follows the structure of GATE but does not fully adhere to it. For example, GATE chooses investment and the split of compute between training and inference with a forward-looking social planner; here both follow fixed rules, so investment in AI does not anticipate automation before it happens. The unemployment, income-distribution and wellbeing parts are additions GATE does not have." }),
     el("p", { text: "Every number the model is unsure of is a distribution over a 90% interval, tagged with how much evidence stands behind it. Each path, one simulated future, draws all of them once. Both scenarios then run on that same path, so their difference comes from the levers alone. The page reports the spread of outcomes and which assumptions the spread tracks. The levers are inputs you set; nothing searches over them, and nothing here ranks them." }),

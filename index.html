@@ -18,7 +18,8 @@
 <header class="top">
   <div>
     <h1>Compute to wellbeing</h1>
-    <p class="lede">A simulation of how growth in AI compute could flow through automation, jobs and incomes to people's life satisfaction in the world economy, 2026 to 2060. Each question compares two scenarios that differ in one respect.</p>
+    <p class="lede">A simulation of how growth in AI compute could flow through automation, jobs and incomes to people's life satisfaction, 2026 to 2060.</p>
+    <p class="credit"><span class="badge">Built on GATE</span> Compute, automation and output follow <a href="https://arxiv.org/abs/2503.04941" target="_blank" rel="noopener">Epoch AI's GATE model</a> of AI and the economy. Jobs, incomes and life satisfaction are a layer added on top. An independent project, not affiliated with Epoch AI.</p>
   </div>
   <button type="button" id="theme" class="ghost" aria-label="Switch colour theme">Theme</button>
 </header>
@@ -27,7 +28,30 @@
   <div class="presets" id="presets" role="radiogroup" aria-label="Questions"></div>
   <h2 id="question"></h2>
   <div class="cards" id="cards"></div>
+  <details class="panel customize" id="customize">
+    <summary>Customize A and B, or the number of simulated futures</summary>
+    <div class="customize-body">
+      <section aria-labelledby="scen-h">
+        <h2 id="scen-h">Scenarios</h2>
+        <p class="note">Change any setting to ask your own question; the picker above then switches to Custom.</p>
+        <div id="scenarios"></div>
+        <div class="row-buttons">
+          <button type="button" id="copy-ab">Copy A to B</button>
+          <button type="button" id="swap-ab">Swap A and B</button>
+        </div>
+      </section>
+      <section aria-labelledby="set-h">
+        <h2 id="set-h">Run</h2>
+        <div class="grid3">
+          <label><span data-help="How many futures to simulate. Each draws every uncertain assumption once, and both scenarios run on the same draws.">Simulated futures</span><input type="number" id="paths" min="50" max="5000" step="50"></label>
+          <label><span data-help="Fixes the random draws, so the same settings always give the same result.">Seed</span><input type="number" id="seed" min="0" step="1"></label>
+          <label><span data-help-lever="discount">Discount</span><input type="number" id="discount" min="0" max="0.1" step="0.005"></label>
+        </div>
+      </section>
+    </div>
+  </details>
   <div class="answer" id="answer" aria-live="polite"></div>
+  <p class="status" id="status" role="status" aria-live="polite">Loading the engine...</p>
 </section>
 
 <div class="layout">
@@ -45,11 +69,15 @@
       <div class="charts" id="answer-charts"></div>
       <h2 class="section">How it gets there</h2>
       <div class="tiles" id="tiles"></div>
-      <div class="charts" id="charts"></div>
+      <div class="charts four" id="charts"></div>
+      <details class="more">
+        <summary>Five more charts: the training run, investment, the labor share, growth and a displaced worker's consumption</summary>
+        <div class="charts" id="more-charts"></div>
+      </details>
     </section>
 
     <section id="tab-drivers" class="tab" role="tabpanel" hidden>
-      <p class="note">Each assumption's rank correlation with the outcome across paths: how closely the spread tracks it. The swing test pins one assumption at its 10th and then its 90th percentile, keeps every other one drawn, and reruns on the same seeds. Both measure the model's sensitivity, not the merit of any lever.</p>
+      <p class="note">Each assumption's rank correlation with the outcome across simulated futures: how closely the spread tracks it. The swing test pins one assumption at its 10th and then its 90th percentile, keeps every other one drawn, and reruns on the same seeds. Both measure the model's sensitivity, not the merit of any lever.</p>
       <div class="split">
         <div class="chart wide">
           <h3>Rank correlation with each outcome</h3>
@@ -76,27 +104,6 @@
       <div id="method"></div>
     </section>
   </main>
-
-  <aside>
-    <section class="panel" aria-labelledby="scen-h">
-      <h2 id="scen-h">Customize the scenarios</h2>
-      <p class="note">Change any setting to ask your own question; the picker above then switches to Custom.</p>
-      <div id="scenarios"></div>
-      <div class="row-buttons">
-        <button type="button" id="copy-ab">Copy A to B</button>
-        <button type="button" id="swap-ab">Swap A and B</button>
-      </div>
-    </section>
-    <section class="panel" aria-labelledby="set-h">
-      <h2 id="set-h">Run</h2>
-      <div class="grid3">
-        <label><span data-help="How many futures to simulate. Each draws every uncertain assumption once, and both scenarios run on the same draws.">Simulated futures</span><input type="number" id="paths" min="50" max="5000" step="50"></label>
-        <label><span data-help="Fixes the random draws, so the same settings always give the same result.">Seed</span><input type="number" id="seed" min="0" step="1"></label>
-        <label><span data-help-lever="discount">Discount</span><input type="number" id="discount" min="0" max="0.1" step="0.005"></label>
-      </div>
-      <p class="status" id="status" role="status" aria-live="polite">Loading the engine...</p>
-    </section>
-  </aside>
 </div>
 
 <footer>
