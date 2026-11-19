@@ -600,8 +600,8 @@ function histogram({ title, sub, edges, counts, xLabel }) {
     svg("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": title }, grid, axis, bars));
 }
 
-function firstYearAtLeast(fan, threshold) {
-  const i = fan.p50.findIndex((v) => v >= threshold);
+function firstYearWhere(fan, test) {
+  const i = fan.p50.findIndex(test);
   return i < 0 ? `after ${result.years[result.years.length - 1]}` : String(result.years[i]);
 }
 
@@ -616,8 +616,8 @@ function renderOutcomes() {
   const unit = (id) => D.nodeById[id].unit;
   const pair = (id) => ({ unit: unit(id), series: [{ key: "a", name: "A", fan: fans.a[id] }, { key: "b", name: "B", fan: fans.b[id] }] });
   const difference = (id) => ({ unit: unit(id), difference: true, series: [{ key: "d", name: `B ${minus} A`, fan: deltaFans[id] }] });
-  const peak = (fan) => Math.max(...fan.p50);
   const last = (fan) => fan.p50[fan.p50.length - 1];
+  const abTile = (k, f, s) => tile(k, `${f(fans.a)} / ${f(fans.b)}`, `A / B, ${s}`);
   renderLegend();
   $("#answer-charts").replaceChildren(
     fanChart({ title: `Wellbeing gained or lost so far, B ${minus} A`, sub: "Cumulative WELLBYs per person since 2026, compared within each simulated future", ...difference("wellby") }),
@@ -625,20 +625,20 @@ function renderOutcomes() {
     fanChart({ title: `Life satisfaction each year, B ${minus} A`, sub: "Population mean, compared within each simulated future", ...difference("lifeSat") }),
   );
   $("#tiles").replaceChildren(
-    tile("Year automation passes 50% of tasks", `${firstYearAtLeast(fans.a.automatedShare, 0.5)} / ${firstYearAtLeast(fans.b.automatedShare, 0.5)}`, "A / B, median future"),
-    tile("Peak unemployment", `${tidyPct(peak(fans.a.unemployment))} / ${tidyPct(peak(fans.b.unemployment))}`, "A / B, median future"),
-    tile(`Output per person in ${result.years[result.years.length - 1]}`, `${FORMATS.multiple(last(fans.a.outputPc))} / ${FORMATS.multiple(last(fans.b.outputPc))}`, "A / B, multiple of 2025, median future"),
+    abTile("Year automation passes 50% of tasks", (f) => firstYearWhere(f.automatedShare, (v) => v >= 0.5), "median future"),
+    abTile("Year the labor share halves", (f) => firstYearWhere(f.laborShare, (v) => v <= f.laborShare.p50[0] / 2), `median future, from ${result.years[0]}`),
+    abTile(`Output per person in ${result.years[result.years.length - 1]}`, (f) => FORMATS.multiple(last(f.outputPc)), "multiple of 2025, median future"),
   );
   $("#charts").replaceChildren(
     fanChart({ title: "Share of tasks automated", sub: "Tasks AI can do that are worth handing to it", ...pair("automatedShare") }),
-    fanChart({ title: "Unemployment rate", sub: "Share of workers without a job", ...pair("unemployment"), refs: refsFor("unemployment") }),
+    fanChart({ title: "Labor share of income", sub: "1 − α times the share of task value still produced by people", ...pair("laborShare"), refs: refsFor("laborShare") }),
     fanChart({ title: "Output per person", sub: "Log scale", ...pair("outputPc"), scale: "log" }),
     fanChart({ title: "Mean life satisfaction", sub: "Its zero is arbitrary: compare A with B, not the level", ...pair("lifeSat") }),
   );
   $("#more-charts").replaceChildren(
     fanChart({ title: "Largest AI training run", sub: "Above the largest run at the end of 2025 (about 5e26 FLOP); +1 OOM is 10 times the compute", ...pair("frontierOoms") }),
     fanChart({ title: "AI's share of investment", sub: "Compute hardware and hardware and software R&D", ...pair("aiInvestmentShare") }),
-    fanChart({ title: "Labor share of income", sub: "1 − α times the share of task value still produced by people", ...pair("laborShare"), refs: refsFor("laborShare") }),
+    fanChart({ title: "Unemployment rate", sub: "Share of workers without a job; re-employment does not slow as automation spreads, see What this is on the Method tab", ...pair("unemployment"), refs: refsFor("unemployment") }),
     fanChart({ title: "Growth of output per person", sub: "Log scale of one plus the growth rate, so slow and explosive years both show", ...pair("growthRate"), scale: "growth", refs: refsFor("growthRate"), zero: true }),
     fanChart({ title: "Consumption of a displaced worker", sub: "Log scale", ...pair("consDisplaced"), scale: "log" }),
   );
@@ -955,7 +955,7 @@ function renderMethod() {
     el("h2", { text: "What this is" }),
     el("p", {}, "Compute, automation and output follow ", el("a", { href: "https://arxiv.org/abs/2503.04941", target: "_blank", rel: "noopener", text: "Epoch AI's GATE model" }), " of AI and the economy; jobs, incomes and life satisfaction are a layer added on top. The model graph tags each group of nodes with where it comes from."),
     el("p", { text: "A scenario explorer, not a forecast and not an advocacy tool. It follows the world economy from 2026 to 2060 in yearly steps, on the structure of Epoch AI's GATE model: investment in hardware and in hardware and software R&D grows effective compute; the largest training run sets which tasks AI can do; AI takes over those tasks where that raises output; output comes from a CES aggregate of human and digital work and from capital; and part of output is reinvested, so automation feeds back into compute. On top of that, some newly automated work becomes job loss; incomes split between top-decile owners, employed workers and displaced workers; and life satisfaction follows log consumption, its relative part, and the non-pecuniary cost of unemployment." }),
-    el("p", { text: "The engine follows the structure of GATE but does not fully adhere to it. For example, GATE chooses investment and the split of compute between training and inference with a forward-looking social planner; here both follow fixed rules, so investment in AI does not anticipate automation before it happens. The unemployment, income-distribution and wellbeing parts are additions GATE does not have." }),
+    el("p", { text: "The engine follows the structure of GATE but does not fully adhere to it. For example, GATE chooses investment and the split of compute between training and inference with a forward-looking social planner; here both follow fixed rules, so investment in AI does not anticipate automation before it happens. The unemployment, income-distribution and wellbeing parts are additions GATE does not have. Two of those additions are simple on purpose: displaced workers find work again at a rate set only by retraining spending, however much is automated, so median unemployment stays within a few points of its baseline; and the 90% who are not top-decile owners split their share of capital income evenly, which keeps their income from falling much when the labor share does. Both mute how much wellbeing responds to automation." }),
     el("p", { text: "Every number the model is unsure of is a distribution over a 90% interval, tagged with how much evidence stands behind it. Each path, one simulated future, draws all of them once. Both scenarios then run on that same path, so their difference comes from the levers alone. The page reports the spread of outcomes and which assumptions the spread tracks. The levers are inputs you set; nothing searches over them, and nothing here ranks them." }),
     el("h2", { text: "How the model compares with published forecasts" }),
     el("p", { text: "These forecasts are a cross-check, not an input: nothing in the model reads them. The model follows GATE, which automates far faster than surveyed economists and AI researchers expect, so growth during the transition is much higher than they forecast and the automation milestones come earlier. Where it departs from them is part of what the page is for. Model figures are scenario A's median path from the current run." }),
